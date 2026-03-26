@@ -224,7 +224,19 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
     elements.append(make(title_ref, "", None))             # trailing blank
 
-    # Insert all in reverse order so final order is preserved
+    # If the insertion-point paragraph carries a section break (w:sectPr inside
+    # its pPr), addnext() would land in the *next* section.  Instead we insert
+    # each element immediately *before* the section-break paragraph, iterating
+    # forward so the final order is preserved.
     ref_elem = anchor_para._element
-    for elem in reversed(elements):
-        ref_elem.addnext(elem)
+    pPr_elem  = ref_elem.find(qn("w:pPr"))
+    has_sectPr = (pPr_elem is not None
+                  and pPr_elem.find(qn("w:sectPr")) is not None)
+
+    if has_sectPr:
+        for elem in elements:          # forward order + addprevious
+            ref_elem.addprevious(elem)
+            ref_elem = elem            # next sibling goes after this one
+    else:
+        for elem in reversed(elements):  # original: reverse + addnext
+            ref_elem.addnext(elem)
