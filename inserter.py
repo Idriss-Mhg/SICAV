@@ -21,14 +21,12 @@ def reset_counter():
     _ins_counter = 0
 
 
-# ── Reference paragraph selection ─────────────────────────────────────────────
+# ── Reference paragraph finders ───────────────────────────────────────────────
 
 def _is_bold(para):
-    """True if the paragraph's first run has explicit bold formatting."""
     if not para.runs:
         return False
     run = para.runs[0]
-    # Direct bold OR inherited bold from rPr
     return bool(run.bold) or (
         run._element.rPr is not None
         and run._element.rPr.find(qn("w:b")) is not None
@@ -36,11 +34,7 @@ def _is_bold(para):
 
 
 def find_body_ref(paragraphs, comp_start, comp_end):
-    """
-    Returns the first non-empty, non-bold Normal paragraph inside the
-    compartment — used as formatting reference for inserted body text.
-    Falls back to paragraphs[comp_start] if nothing qualifies.
-    """
+    """First non-empty, non-bold Normal paragraph in the compartment."""
     for i in range(comp_start + 1, comp_end + 1):
         p = paragraphs[i]
         if not p.text.strip():
@@ -53,7 +47,15 @@ def find_body_ref(paragraphs, comp_start, comp_end):
     return paragraphs[comp_start]
 
 
-# ── XML helpers ───────────────────────────────────────────────────────────────
+def find_bullet_ref(doc):
+    """First non-empty List Paragraph in the whole document (bullet reference)."""
+    for para in doc.paragraphs:
+        if para.style.name == "List Paragraph" and para.text.strip():
+            return para
+    return None
+
+
+# ── Low-level XML helpers ─────────────────────────────────────────────────────
 
 def _copy_pPr(ref_para):
     if ref_para._element.pPr is not None:
@@ -65,15 +67,14 @@ def _copy_rPr(ref_para, bold=None):
     """
     Copy run properties from ref_para's first run.
     bold=True  → force bold on
-    bold=False → force bold off (remove w:b / add w:b with w:val="0")
-    bold=None  → keep whatever the reference has
+    bold=False → force bold off
+    bold=None  → keep reference as-is
     """
     if ref_para.runs and ref_para.runs[0]._element.rPr is not None:
         rPr = copy.deepcopy(ref_para.runs[0]._element.rPr)
     else:
         rPr = OxmlElement("w:rPr")
 
-    # Remove any existing bold elements before applying our override
     for b in rPr.findall(qn("w:b")):
         rPr.remove(b)
     for b in rPr.findall(qn("w:bCs")):
@@ -82,101 +83,145 @@ def _copy_rPr(ref_para, bold=None):
     if bold is True:
         rPr.insert(0, OxmlElement("w:b"))
     elif bold is False:
-        # Explicitly cancel bold (needed when ref has bold inherited from style)
         b_off = OxmlElement("w:b")
         b_off.set(qn("w:val"), "0")
         rPr.insert(0, b_off)
-    # bold=None → leave as-is (reference formatting preserved)
 
     return rPr
+
+
+def _make_run(ref_para, text, bold=None):
+    r = OxmlElement("w:r")
+    r.append(_copy_rPr(ref_para, bold))
+    t = OxmlElement("w:t")
+    t.text = text
+    t.set(qn("xml:space"), "preserve")
+    r.append(t)
+    return r
+
+
+def _mark_pPr_ins(pPr):
+    """Add w:ins marker inside pPr/rPr (marks the paragraph mark as inserted)."""
+    rPr = pPr.find(qn("w:rPr"))
+    if rPr is None:
+        rPr = OxmlElement("w:rPr")
+        pPr.append(rPr)
+    ins = OxmlElement("w:ins")
+    ins.set(qn("w:id"),     _next_id())
+    ins.set(qn("w:author"), REVIEW_AUTHOR)
+    ins.set(qn("w:date"),   REVIEW_DATE)
+    rPr.insert(0, ins)
+
+
+def _wrap_ins(run_elem):
+    """Wrap a w:r element inside a w:ins element."""
+    w_ins = OxmlElement("w:ins")
+    w_ins.set(qn("w:id"),     _next_id())
+    w_ins.set(qn("w:author"), REVIEW_AUTHOR)
+    w_ins.set(qn("w:date"),   REVIEW_DATE)
+    w_ins.append(run_elem)
+    return w_ins
 
 
 # ── Paragraph factories ───────────────────────────────────────────────────────
 
 def _make_para(ref_para, text, bold=None):
-    """Plain paragraph, formatting copied from ref_para."""
+    """Plain paragraph styled like ref_para."""
     new_p = OxmlElement("w:p")
     pPr = _copy_pPr(ref_para)
     if pPr is not None:
         new_p.append(pPr)
-    if not text:
-        return new_p
-    new_r = OxmlElement("w:r")
-    new_r.append(_copy_rPr(ref_para, bold))
-    new_t = OxmlElement("w:t")
-    new_t.text = text
-    new_t.set(qn("xml:space"), "preserve")
-    new_r.append(new_t)
-    new_p.append(new_r)
+    if text:
+        new_p.append(_make_run(ref_para, text, bold))
     return new_p
 
 
 def _make_para_review(ref_para, text, bold=None):
-    """
-    Same as _make_para but wrapped in Word track-changes (w:ins).
-    Appears green + underlined; reviewers can Accept / Reject in Word.
-    """
+    """Same as _make_para but with w:ins track-changes markup."""
     new_p = OxmlElement("w:p")
-
-    # Mark the paragraph mark itself as inserted (needed for correct track-change display)
     pPr = _copy_pPr(ref_para)
     if pPr is None:
         pPr = OxmlElement("w:pPr")
-    rPr_in_pPr = pPr.find(qn("w:rPr"))
-    if rPr_in_pPr is None:
-        rPr_in_pPr = OxmlElement("w:rPr")
-        pPr.append(rPr_in_pPr)
-    ins_mark = OxmlElement("w:ins")
-    ins_mark.set(qn("w:id"),     _next_id())
-    ins_mark.set(qn("w:author"), REVIEW_AUTHOR)
-    ins_mark.set(qn("w:date"),   REVIEW_DATE)
-    rPr_in_pPr.insert(0, ins_mark)
+    _mark_pPr_ins(pPr)
     new_p.append(pPr)
+    if text:
+        new_p.append(_wrap_ins(_make_run(ref_para, text, bold)))
+    return new_p
 
-    if not text:
-        return new_p
 
-    w_ins = OxmlElement("w:ins")
-    w_ins.set(qn("w:id"),     _next_id())
-    w_ins.set(qn("w:author"), REVIEW_AUTHOR)
-    w_ins.set(qn("w:date"),   REVIEW_DATE)
-
-    new_r = OxmlElement("w:r")
-    new_r.append(_copy_rPr(ref_para, bold))
-    new_t = OxmlElement("w:t")
-    new_t.text = text
-    new_t.set(qn("xml:space"), "preserve")
-    new_r.append(new_t)
-    w_ins.append(new_r)
-    new_p.append(w_ins)
-
+def _make_bullet(ref_bullet, ref_body, text, review=False):
+    """
+    Bullet paragraph: pPr (incl. numPr) from ref_bullet, rPr from ref_body.
+    ref_bullet must be a List Paragraph paragraph to carry correct bullet style.
+    """
+    new_p = OxmlElement("w:p")
+    pPr = _copy_pPr(ref_bullet)
+    if pPr is None:
+        pPr = OxmlElement("w:pPr")
+    if review:
+        _mark_pPr_ins(pPr)
+    new_p.append(pPr)
+    if text:
+        run = _make_run(ref_body, text, bold=False)
+        new_p.append(_wrap_ins(run) if review else run)
     return new_p
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def insert_clause_after(anchor_para, clause_title, body_ref_para, review=False):
+def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
+                         body_ref_para, bullet_ref_para=None, review=False):
     """
     Inserts a clause block immediately after anchor_para.
 
+    clause_type     : 'texte' | 'liste' | 'sous_titres'
+    content_items   : list of dicts —
+        texte       : [{"texte": "..."}]
+        liste       : [{"texte": "bullet 1"}, {"texte": "bullet 2"}, ...]
+        sous_titres : [{"texte": "Sub A", "sous_texte": "Body A"}, ...]
+
     Formatting references:
-      - blank lines   → anchor_para  (neutral)
-      - clause title  → anchor_para  (section-title style)
-      - body text     → body_ref_para (first normal body para of the compartment)
+        title / blank / subtitle  ← anchor_para  (section-title style)
+        body text                 ← body_ref_para (first normal body para)
+        bullet pPr                ← bullet_ref_para (List Paragraph)
 
-    review=True  → w:ins track-changes markup (green underline in Word)
-    review=False → clean insertion
+    review=True  → w:ins track-changes markup
     """
-    make = _make_para_review if review else _make_para
+    make        = _make_para_review if review else _make_para
+    bullet_ref  = bullet_ref_para or body_ref_para
 
-    # (ref_para, text, bold)
-    blocks = [
-        (anchor_para,   "",                                    None),   # trailing blank
-        (body_ref_para, "[CLAUSE CONTENT TO BE COMPLETED]",   False),  # body placeholder
-        (anchor_para,   clause_title,                         True),   # title
-        (anchor_para,   "",                                    None),   # leading blank
-    ]
+    # Build paragraphs in final display order
+    elements = []
+    elements.append(make(anchor_para, "", None))           # leading blank
+    elements.append(make(anchor_para, clause_title, True)) # clause title (bold)
 
-    ref = anchor_para._element
-    for ref_para, text, bold in blocks:
-        ref.addnext(make(ref_para, text, bold=bold))
+    if clause_type == "texte":
+        text = (
+            content_items[0].get("texte") if content_items and content_items[0].get("texte")
+            else "[TEXTE À COMPLÉTER]"
+        )
+        elements.append(make(body_ref_para, text, False))
+
+    elif clause_type == "liste":
+        items = content_items or [{"texte": "[PUCE À COMPLÉTER]"}]
+        for item in items:
+            t = item.get("texte") or "[PUCE À COMPLÉTER]"
+            elements.append(_make_bullet(bullet_ref, body_ref_para, t, review=review))
+
+    elif clause_type == "sous_titres":
+        items = content_items or [{"texte": "[SOUS-TITRE]", "sous_texte": "[TEXTE À COMPLÉTER]"}]
+        for item in items:
+            st = (item.get("texte") or "[SOUS-TITRE]").rstrip()
+            if not st.endswith(":"):
+                st += ":"
+            body_text = item.get("sous_texte") or "[TEXTE À COMPLÉTER]"
+            # Subtitle: body_ref formatting + bold (same size/colour as body, just bold)
+            elements.append(make(body_ref_para, st, True))
+            elements.append(make(body_ref_para, body_text, False))
+
+    elements.append(make(anchor_para, "", None))           # trailing blank
+
+    # Insert all in reverse order so final order is preserved
+    ref_elem = anchor_para._element
+    for elem in reversed(elements):
+        ref_elem.addnext(elem)

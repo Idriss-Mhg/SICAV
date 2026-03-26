@@ -151,6 +151,7 @@ class TabTraitement(ttk.Frame):
 
         self.var_out    = tk.StringVar()
         self.var_review = tk.StringVar()
+        self.var_pdf    = tk.StringVar()
 
         self._file_row(frm_files, 0, "Prospectus (.docx)",
                        self.shared["var_docx"],
@@ -164,6 +165,9 @@ class TabTraitement(ttk.Frame):
         self._file_row(frm_files, 3, "Sortie review (.docx)",
                        self.var_review,
                        [("Word documents", "*.docx")], save=True)
+        self._file_row(frm_files, 4, "Sortie PDF (.pdf)",
+                       self.var_pdf,
+                       [("PDF", "*.pdf")], save=True)
 
         # ── Options ───────────────────────────────────────────────────────────
         frm_opts = ttk.LabelFrame(self, text="Options", padding=10)
@@ -243,6 +247,7 @@ class TabTraitement(ttk.Frame):
         excel  = self.shared["var_excel"].get().strip()
         out    = self.var_out.get().strip()
         review = self.var_review.get().strip() or None
+        pdf    = self.var_pdf.get().strip() or None
 
         errors = []
         if not docx or not os.path.isfile(docx):
@@ -264,6 +269,8 @@ class TabTraitement(ttk.Frame):
         self._log(f"Sortie normale: {out}")
         if review:
             self._log(f"Sortie review : {review}")
+        if pdf:
+            self._log(f"Sortie PDF    : {pdf}")
         self._log("─" * 60)
 
         dry = self.var_dry_run.get()
@@ -274,6 +281,7 @@ class TabTraitement(ttk.Frame):
                     docx, excel,
                     out    + ".DRY_RUN_IGNORE" if dry else out,
                     (review + ".DRY_RUN_IGNORE" if dry else review) if review else None,
+                    None if dry else pdf,
                     log=self._smart_log,
                 )
                 if dry:
@@ -283,6 +291,8 @@ class TabTraitement(ttk.Frame):
                         self.after(500, lambda: _open_file(out))
                     if review and os.path.isfile(review):
                         self.after(800, lambda: _open_file(review))
+                    if pdf and os.path.isfile(pdf):
+                        self.after(1100, lambda: _open_file(pdf))
 
                 n_warn = len(result["warnings"])
                 self._log(
@@ -301,6 +311,134 @@ class TabTraitement(ttk.Frame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Content editor widget (embedded in TabClauses)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ContentEditor(ttk.LabelFrame):
+    """
+    Dynamic editor that adapts to the clause type:
+      texte       → single multi-line text area
+      liste       → list of bullet entries (add / delete rows)
+      sous_titres → list of (subtitle, body-text) row pairs (add / delete)
+    """
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, text="Contenu", padding=6, **kwargs)
+        self._type = None
+        self._rows  = []   # list of row frames + StringVar(s)
+        self._text_widget = None
+        self._items_frame = None
+        self.set_type("texte")
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_type(self, type_):
+        if type_ == self._type:
+            return
+        self._type = type_
+        self._rows = []
+        for w in self.winfo_children():
+            w.destroy()
+
+        if type_ == "texte":
+            self._build_texte()
+        elif type_ == "liste":
+            self._build_liste()
+        elif type_ == "sous_titres":
+            self._build_sous_titres()
+
+    def get_items(self):
+        """Return list of dicts matching the mapping.py content format."""
+        if self._type == "texte":
+            return [{"texte": self._text_widget.get("1.0", "end-1c").strip(),
+                     "sous_texte": ""}]
+        items = []
+        for row_data in self._rows:
+            if self._type == "liste":
+                t = row_data[0].get().strip()
+                if t:
+                    items.append({"texte": t, "sous_texte": ""})
+            else:  # sous_titres
+                t  = row_data[0].get().strip()
+                st = row_data[1].get().strip()
+                if t:
+                    items.append({"texte": t, "sous_texte": st})
+        return items
+
+    def set_items(self, items):
+        """Load content items into the editor."""
+        # Rebuild to clear existing rows
+        self.set_type(self._type)
+        if not items:
+            return
+        if self._type == "texte":
+            self._text_widget.delete("1.0", "end")
+            self._text_widget.insert("end", items[0].get("texte", ""))
+        elif self._type == "liste":
+            for item in items:
+                self._add_row(item.get("texte", ""))
+        else:  # sous_titres
+            for item in items:
+                self._add_row(item.get("texte", ""), item.get("sous_texte", ""))
+
+    # ── Type-specific builders ────────────────────────────────────────────────
+
+    def _build_texte(self):
+        self._text_widget = scrolledtext.ScrolledText(
+            self, height=5, wrap="word", font=("TkDefaultFont", 9))
+        self._text_widget.pack(fill="both", expand=True)
+
+    def _build_liste(self):
+        self._items_frame = ttk.Frame(self)
+        self._items_frame.pack(fill="x")
+        ttk.Button(self, text="+ Ajouter une puce",
+                   command=lambda: self._add_row()).pack(anchor="w", pady=(4, 0))
+
+    def _build_sous_titres(self):
+        hdr = ttk.Frame(self)
+        hdr.pack(fill="x")
+        ttk.Label(hdr, text="Sous-titre", width=20).pack(side="left")
+        ttk.Label(hdr, text="Texte").pack(side="left", padx=(4, 0))
+        self._items_frame = ttk.Frame(self)
+        self._items_frame.pack(fill="x")
+        ttk.Button(self, text="+ Ajouter un sous-titre",
+                   command=lambda: self._add_row()).pack(anchor="w", pady=(4, 0))
+
+    # ── Row management ────────────────────────────────────────────────────────
+
+    def _add_row(self, text="", sous_text=""):
+        row_frame = ttk.Frame(self._items_frame)
+        row_frame.pack(fill="x", pady=1)
+
+        if self._type == "liste":
+            ttk.Label(row_frame, text="•", width=2).pack(side="left")
+            var = tk.StringVar(value=text)
+            ttk.Entry(row_frame, textvariable=var).pack(
+                side="left", fill="x", expand=True, padx=(2, 4))
+            ttk.Button(row_frame, text="✕", width=2,
+                       command=lambda f=row_frame, v=var: self._del_row(f, v)
+                       ).pack(side="left")
+            self._rows.append((var,))
+
+        else:  # sous_titres
+            var_t  = tk.StringVar(value=text)
+            var_st = tk.StringVar(value=sous_text)
+            ttk.Entry(row_frame, textvariable=var_t, width=20).pack(
+                side="left", padx=(0, 4))
+            ttk.Entry(row_frame, textvariable=var_st).pack(
+                side="left", fill="x", expand=True, padx=(0, 4))
+            ttk.Button(row_frame, text="✕", width=2,
+                       command=lambda f=row_frame, vt=var_t, vs=var_st:
+                           self._del_row(f, vt, vs)
+                       ).pack(side="left")
+            self._rows.append((var_t, var_st))
+
+    def _del_row(self, frame, *vars_):
+        frame.destroy()
+        self._rows = [r for r in self._rows if r[0] is not vars_[0]]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tab 2 — Gestion des clauses
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -308,14 +446,14 @@ class TabClauses(ttk.Frame):
     def __init__(self, parent, shared):
         super().__init__(parent)
         self.shared = shared
-        self._editing_id = None   # clause ID currently being edited (None = new)
+        self._editing_id    = None
+        self._clause_content = {}   # {clause_id: [items]}
         self._build()
         self._load_from_excel()
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self):
-        # Split: left = table, right = form
         self.columnconfigure(0, weight=3)
         self.columnconfigure(1, weight=2)
         self.rowconfigure(0, weight=1)
@@ -326,18 +464,21 @@ class TabClauses(ttk.Frame):
         frm_tree.rowconfigure(0, weight=1)
         frm_tree.columnconfigure(0, weight=1)
 
-        cols = ("id", "titre", "ancre")
+        cols = ("id", "titre", "ancre", "position", "type")
         self.tree = ttk.Treeview(frm_tree, columns=cols,
                                  show="headings", selectmode="browse")
-        self.tree.heading("id",    text="ID",    anchor="w")
-        self.tree.heading("titre", text="Titre", anchor="w")
-        self.tree.heading("ancre", text="Ancre", anchor="w")
-        self.tree.column("id",    width=60,  stretch=False)
-        self.tree.column("titre", width=180)
-        self.tree.column("ancre", width=180)
+        self.tree.heading("id",       text="ID",       anchor="w")
+        self.tree.heading("titre",    text="Titre",    anchor="w")
+        self.tree.heading("ancre",    text="Ancre",    anchor="w")
+        self.tree.heading("position", text="Position", anchor="w")
+        self.tree.heading("type",     text="Type",     anchor="w")
+        self.tree.column("id",       width=50,  stretch=False)
+        self.tree.column("titre",    width=140)
+        self.tree.column("ancre",    width=140)
+        self.tree.column("position", width=90,  stretch=False)
+        self.tree.column("type",     width=80,  stretch=False)
 
-        sb = ttk.Scrollbar(frm_tree, orient="vertical",
-                           command=self.tree.yview)
+        sb = ttk.Scrollbar(frm_tree, orient="vertical", command=self.tree.yview)
         self.tree.config(yscrollcommand=sb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         sb.grid(row=0, column=1, sticky="ns")
@@ -345,7 +486,6 @@ class TabClauses(ttk.Frame):
 
         frm_tree_btn = ttk.Frame(frm_tree)
         frm_tree_btn.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-
         ttk.Button(frm_tree_btn, text="Nouvelle clause",
                    command=self._new_clause).pack(side="left")
         self.btn_delete = ttk.Button(frm_tree_btn, text="Supprimer",
@@ -353,62 +493,76 @@ class TabClauses(ttk.Frame):
         self.btn_delete.pack(side="left", padx=(6, 0))
 
         # ── RIGHT: Form ───────────────────────────────────────────────────────
-        frm_form = ttk.LabelFrame(self, text="Définir / Modifier", padding=10)
-        frm_form.grid(row=0, column=1, sticky="nsew", padx=(4, 12), pady=10)
-        frm_form.columnconfigure(1, weight=1)
+        frm_right = ttk.Frame(self)
+        frm_right.grid(row=0, column=1, sticky="nsew", padx=(4, 12), pady=10)
+        frm_right.columnconfigure(0, weight=1)
+        frm_right.rowconfigure(1, weight=1)
 
-        self.var_id     = tk.StringVar()
-        self.var_titre  = tk.StringVar()
-        self.var_ancre  = tk.StringVar()
+        frm_meta = ttk.LabelFrame(frm_right, text="Définir / Modifier", padding=8)
+        frm_meta.grid(row=0, column=0, sticky="ew")
+        frm_meta.columnconfigure(1, weight=1)
 
-        fields = [
-            ("ID",    self.var_id,    False),
-            ("Titre", self.var_titre, False),
-            ("Ancre", self.var_ancre, True),   # True = show anchor picker btn
-        ]
-        for row, (label, var, has_picker) in enumerate(fields):
-            ttk.Label(frm_form, text=label).grid(
-                row=row, column=0, sticky="w", pady=4)
-            ttk.Entry(frm_form, textvariable=var).grid(
-                row=row, column=1, sticky="ew", padx=(6, 0))
-            if has_picker:
-                ttk.Button(
-                    frm_form, text="⌕", width=3,
-                    command=self._open_anchor_picker,
-                ).grid(row=row, column=2, padx=(4, 0))
+        self.var_id       = tk.StringVar()
+        self.var_titre    = tk.StringVar()
+        self.var_ancre    = tk.StringVar()
+        self.var_position = tk.StringVar(value="apres_titre")
+        self.var_type     = tk.StringVar(value="texte")
 
-        # Anchor preview label
-        ttk.Label(frm_form, text="Aperçu ancre :").grid(
-            row=3, column=0, sticky="nw", pady=(8, 0))
-        self.lbl_preview = ttk.Label(
-            frm_form, text="", wraplength=200,
-            foreground="#555", font=("TkDefaultFont", 8, "italic"),
-        )
-        self.lbl_preview.grid(row=3, column=1, columnspan=2,
-                               sticky="nw", padx=(6, 0), pady=(8, 0))
+        ttk.Label(frm_meta, text="ID").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(frm_meta, textvariable=self.var_id).grid(
+            row=0, column=1, columnspan=2, sticky="ew", padx=(6, 0))
+
+        ttk.Label(frm_meta, text="Titre").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(frm_meta, textvariable=self.var_titre).grid(
+            row=1, column=1, columnspan=2, sticky="ew", padx=(6, 0))
+
+        ttk.Label(frm_meta, text="Ancre").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Entry(frm_meta, textvariable=self.var_ancre).grid(
+            row=2, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(frm_meta, text="⌕", width=3,
+                   command=self._open_anchor_picker).grid(row=2, column=2, padx=(4, 0))
+
+        ttk.Label(frm_meta, text="Position").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Combobox(frm_meta, textvariable=self.var_position,
+                     values=["apres_titre", "apres_section"],
+                     state="readonly", width=16).grid(
+                         row=3, column=1, sticky="w", padx=(6, 0))
+
+        ttk.Label(frm_meta, text="Type").grid(row=4, column=0, sticky="w", pady=3)
+        cb_type = ttk.Combobox(frm_meta, textvariable=self.var_type,
+                               values=["texte", "liste", "sous_titres"],
+                               state="readonly", width=16)
+        cb_type.grid(row=4, column=1, sticky="w", padx=(6, 0))
+        cb_type.bind("<<ComboboxSelected>>",
+                     lambda _: self.content_editor.set_type(self.var_type.get()))
+
+        # Anchor preview
+        self.lbl_preview = ttk.Label(frm_meta, text="", wraplength=200,
+                                     foreground="#777",
+                                     font=("TkDefaultFont", 8, "italic"))
+        self.lbl_preview.grid(row=5, column=0, columnspan=3, sticky="w",
+                              padx=(0, 0), pady=(2, 0))
         self.var_ancre.trace_add("write",
-                                 lambda *_: self.lbl_preview.config(
-                                     text=self.var_ancre.get()[:120]))
+            lambda *_: self.lbl_preview.config(text=self.var_ancre.get()[:100]))
 
-        # Buttons
-        frm_form_btn = ttk.Frame(frm_form)
-        frm_form_btn.grid(row=4, column=0, columnspan=3,
-                          sticky="ew", pady=(16, 0))
-        self.btn_save_clause = ttk.Button(
-            frm_form_btn, text="Enregistrer la clause",
-            command=self._save_clause)
-        self.btn_save_clause.pack(side="right")
-        ttk.Button(frm_form_btn, text="Réinitialiser",
+        # Content editor (dynamic)
+        self.content_editor = ContentEditor(frm_right)
+        self.content_editor.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+
+        # Save / Reset buttons
+        frm_btn = ttk.Frame(frm_right)
+        frm_btn.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(frm_btn, text="Enregistrer",
+                   command=self._save_clause).pack(side="right")
+        ttk.Button(frm_btn, text="Réinitialiser",
                    command=self._reset_form).pack(side="right", padx=(0, 6))
 
-        # ── Bottom: Save to Excel ─────────────────────────────────────────────
+        # ── Bottom: Excel actions ─────────────────────────────────────────────
         frm_bottom = ttk.Frame(self)
         frm_bottom.grid(row=1, column=0, columnspan=2,
                         sticky="ew", padx=12, pady=(0, 10))
-
         self.lbl_status = ttk.Label(frm_bottom, text="", foreground="green")
         self.lbl_status.pack(side="left")
-
         ttk.Button(frm_bottom, text="💾  Sauvegarder dans l'Excel",
                    command=self._save_to_excel).pack(side="right")
         ttk.Button(frm_bottom, text="↺  Recharger depuis l'Excel",
@@ -424,17 +578,23 @@ class TabClauses(ttk.Frame):
         for row in rows:
             self.tree.insert("", "end", values=row)
 
-    def _on_tree_select(self, _event=None):
+    def _on_tree_select(self, _=None):
         sel = self.tree.selection()
         if not sel:
             self.btn_delete.config(state="disabled")
             return
         self.btn_delete.config(state="normal")
-        values = self.tree.item(sel[0])["values"]
-        self._editing_id = values[0]
-        self.var_id.set(values[0])
-        self.var_titre.set(values[1])
-        self.var_ancre.set(values[2])
+        v = self.tree.item(sel[0])["values"]
+        self._editing_id = str(v[0])
+        self.var_id.set(v[0])
+        self.var_titre.set(v[1])
+        self.var_ancre.set(v[2])
+        self.var_position.set(v[3] if len(v) > 3 else "apres_titre")
+        typ = str(v[4]) if len(v) > 4 else "texte"
+        self.var_type.set(typ)
+        self.content_editor.set_type(typ)
+        self.content_editor.set_items(
+            self._clause_content.get(str(v[0]), []))
 
     # ── Form actions ──────────────────────────────────────────────────────────
 
@@ -447,11 +607,17 @@ class TabClauses(ttk.Frame):
         self.var_id.set("")
         self.var_titre.set("")
         self.var_ancre.set("")
+        self.var_position.set("apres_titre")
+        self.var_type.set("texte")
+        self.content_editor.set_type("texte")
+        self.content_editor.set_items([])
 
     def _save_clause(self):
-        cid    = self.var_id.get().strip()
-        titre  = self.var_titre.get().strip()
-        ancre  = self.var_ancre.get().strip()
+        cid      = self.var_id.get().strip()
+        titre    = self.var_titre.get().strip()
+        ancre    = self.var_ancre.get().strip()
+        position = self.var_position.get()
+        typ      = self.var_type.get()
 
         if not cid or not titre or not ancre:
             messagebox.showwarning("Champs manquants",
@@ -459,20 +625,17 @@ class TabClauses(ttk.Frame):
             return
 
         rows = self._tree_rows()
+        new_row = [cid, titre, ancre, position, typ]
 
-        # Check duplicate ID (only for new clauses)
         if self._editing_id is None:
             if any(str(r[0]) == cid for r in rows):
-                messagebox.showerror("ID en double",
-                                     f"L'ID « {cid} » existe déjà.")
+                messagebox.showerror("ID en double", f"L'ID « {cid} » existe déjà.")
                 return
-            rows.append([cid, titre, ancre])
+            rows.append(new_row)
         else:
-            rows = [
-                [cid, titre, ancre] if str(r[0]) == str(self._editing_id) else r
-                for r in rows
-            ]
+            rows = [new_row if str(r[0]) == self._editing_id else r for r in rows]
 
+        self._clause_content[cid] = self.content_editor.get_items()
         self._refresh_tree(rows)
         self._reset_form()
         self._set_status("Clause enregistrée (non sauvegardée dans l'Excel)")
@@ -481,21 +644,20 @@ class TabClauses(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        cid = self.tree.item(sel[0])["values"][0]
-        if not messagebox.askyesno("Confirmer",
-                                   f"Supprimer la clause « {cid} » ?"):
+        cid = str(self.tree.item(sel[0])["values"][0])
+        if not messagebox.askyesno("Confirmer", f"Supprimer la clause « {cid} » ?"):
             return
         self.tree.delete(sel[0])
+        self._clause_content.pop(cid, None)
         self._reset_form()
-        self._set_status(f"Clause {cid} supprimée (non sauvegardée dans l'Excel)")
+        self._set_status(f"Clause {cid} supprimée")
 
     # ── Anchor picker ─────────────────────────────────────────────────────────
 
     def _open_anchor_picker(self):
         docx = self.shared["var_docx"].get().strip()
         if not docx or not os.path.isfile(docx):
-            messagebox.showwarning(
-                "Prospectus manquant",
+            messagebox.showwarning("Prospectus manquant",
                 "Sélectionnez d'abord un prospectus dans l'onglet Traitement.")
             return
         AnchorPickerDialog(self.winfo_toplevel(), docx, self.var_ancre)
@@ -507,14 +669,29 @@ class TabClauses(ttk.Frame):
         if not excel or not os.path.isfile(excel):
             return
         try:
-            wb = openpyxl.load_workbook(excel)
-            ws = wb["clauses"]
+            wb   = openpyxl.load_workbook(excel)
             rows = []
-            for r in ws.iter_rows(min_row=2, values_only=True):
-                if r[0]:
-                    rows.append([str(r[0]), str(r[1] or ""), str(r[2] or "")])
+            for r in wb["clauses"].iter_rows(min_row=2, values_only=True):
+                if not r[0]:
+                    continue
+                pos = str(r[3]).strip().lower() if len(r) > 3 and r[3] else "apres_titre"
+                typ = str(r[4]).strip().lower() if len(r) > 4 and r[4] else "texte"
+                rows.append([str(r[0]), str(r[1] or ""), str(r[2] or ""), pos, typ])
+
+            # Load content
+            self._clause_content = {}
+            if "contenu" in wb.sheetnames:
+                for r in wb["contenu"].iter_rows(min_row=2, values_only=True):
+                    if not r[0]:
+                        continue
+                    cid  = str(r[0]).strip()
+                    texte     = str(r[2]).strip() if len(r) > 2 and r[2] else ""
+                    sous_texte = str(r[3]).strip() if len(r) > 3 and r[3] else ""
+                    self._clause_content.setdefault(cid, []).append(
+                        {"texte": texte, "sous_texte": sous_texte})
+
             self._refresh_tree(rows)
-            self._set_status(f"{len(rows)} clause(s) chargée(s) depuis l'Excel")
+            self._set_status(f"{len(rows)} clause(s) chargée(s)")
         except Exception as exc:
             messagebox.showerror("Erreur", f"Impossible de lire l'Excel :\n{exc}")
 
@@ -523,28 +700,46 @@ class TabClauses(ttk.Frame):
         if not excel:
             messagebox.showerror("Erreur", "Aucun fichier Excel sélectionné.")
             return
-
         rows = self._tree_rows()
         if not rows:
             messagebox.showwarning("Vide", "Aucune clause à sauvegarder.")
             return
-
         try:
             wb = openpyxl.load_workbook(excel)
-            ws = wb["clauses"]
 
-            # Clear existing clause data (keep header)
-            for row in ws.iter_rows(min_row=2):
+            # ── clauses sheet ─────────────────────────────────────────────────
+            ws1 = wb["clauses"]
+            for row in ws1.iter_rows(min_row=2):
                 for cell in row:
                     cell.value = None
+            for i, r in enumerate(rows, start=2):
+                for j, val in enumerate(r, start=1):
+                    ws1.cell(row=i, column=j, value=val)
 
-            for i, (cid, titre, ancre) in enumerate(rows, start=2):
-                ws.cell(row=i, column=1, value=cid)
-                ws.cell(row=i, column=2, value=titre)
-                ws.cell(row=i, column=3, value=ancre)
+            # ── contenu sheet ─────────────────────────────────────────────────
+            if "contenu" not in wb.sheetnames:
+                wb.create_sheet("contenu")
+            ws2 = wb["contenu"]
+            # Ensure header
+            if ws2.max_row < 1 or ws2.cell(1, 1).value != "ClauseID":
+                ws2.delete_rows(1, ws2.max_row)
+                ws2.append(["ClauseID", "Ordre", "Texte", "Sous_texte"])
+            else:
+                ws2.delete_rows(2, ws2.max_row)
+
+            row_idx = 2
+            for r in rows:
+                cid   = str(r[0])
+                items = self._clause_content.get(cid, [])
+                for ordre, item in enumerate(items, start=1):
+                    ws2.cell(row=row_idx, column=1, value=cid)
+                    ws2.cell(row=row_idx, column=2, value=ordre)
+                    ws2.cell(row=row_idx, column=3, value=item.get("texte", ""))
+                    ws2.cell(row=row_idx, column=4, value=item.get("sous_texte", ""))
+                    row_idx += 1
 
             wb.save(excel)
-            self._set_status(f"✓ {len(rows)} clause(s) sauvegardée(s) dans {os.path.basename(excel)}")
+            self._set_status(f"✓ Sauvegardé dans {os.path.basename(excel)}")
         except Exception as exc:
             messagebox.showerror("Erreur", f"Impossible d'écrire dans l'Excel :\n{exc}")
 
@@ -583,6 +778,7 @@ class App(tk.Tk):
         # Default output path
         tab1.var_out.set(os.path.join(base, "data", "prospectus_updated.docx"))
         tab1.var_review.set(os.path.join(base, "data", "prospectus_review.docx"))
+        tab1.var_pdf.set(os.path.join(base, "data", "prospectus_updated.pdf"))
 
         # Reload clauses when switching to tab 2
         notebook.bind("<<NotebookTabChanged>>", lambda e: (

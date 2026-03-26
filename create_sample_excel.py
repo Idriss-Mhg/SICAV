@@ -1,71 +1,88 @@
 """
 Run once to generate data/mapping.xlsx with sample data.
-Adapt the compartment names and clauses to match your real document.
 """
 import os
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 OUTPUT = "data/mapping.xlsx"
+HDR    = Font(bold=True)
+FILL   = PatternFill("solid", fgColor="D9E1F2")
+
+
+def _style_header(ws, col_widths):
+    for cell in ws[1]:
+        cell.font = HDR
+        cell.fill = FILL
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
 
 
 def main():
     wb = openpyxl.Workbook()
 
-    # ------------------------------------------------------------------ #
-    # Sheet 1 — "clauses"                                                 #
-    # Each row defines a clause: its ID, its title, and the anchor text   #
-    # (the exact paragraph after which the clause will be inserted).      #
-    # ------------------------------------------------------------------ #
+    # ── Sheet "clauses" ───────────────────────────────────────────────────────
     ws1 = wb.active
     ws1.title = "clauses"
-
-    headers = ["ClauseID", "ClauseTitre", "InsererApres"]
-    ws1.append(headers)
+    ws1.append(["ClauseID", "ClauseTitre", "InsererApres", "Position", "Type"])
 
     sample_clauses = [
-        ["CL01", "Sustainable Finance Disclosure Clause", "Risk Management:"],
-        ["CL02", "Stewardship Policy Clause",             "Conflicts of interest"],
-        ["CL03", "German Investment Tax Act Clause",      "Reference Currency:"],
+        ["CL01", "Sustainable Finance Disclosure",
+         "Risk Management:",     "apres_section", "texte"],
+        ["CL02", "Stewardship Policy",
+         "Conflicts of interest", "apres_section", "liste"],
+        ["CL03", "German Investment Tax Act",
+         "Reference Currency:",  "apres_titre",   "sous_titres"],
     ]
     for row in sample_clauses:
         ws1.append(row)
 
-    # Style header row
-    for cell in ws1[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="D9E1F2")
-    ws1.column_dimensions["A"].width = 10
-    ws1.column_dimensions["B"].width = 45
-    ws1.column_dimensions["C"].width = 55
+    _style_header(ws1, {"A": 10, "B": 38, "C": 42, "D": 16, "E": 14})
 
-    # ------------------------------------------------------------------ #
-    # Sheet 2 — "mapping"                                                 #
-    # Rows = compartments, columns = clause IDs.                          #
-    # Put an "X" in a cell to insert that clause in that compartment.     #
-    # ------------------------------------------------------------------ #
-    ws2 = wb.create_sheet("mapping")
+    # ── Sheet "contenu" ───────────────────────────────────────────────────────
+    ws2 = wb.create_sheet("contenu")
+    ws2.append(["ClauseID", "Ordre", "Texte", "Sous_texte"])
 
+    sample_content = [
+        # CL01 — texte
+        ["CL01", 1,
+         "The Management Company ensures compliance with Regulation (EU) 2019/2088 "
+         "(SFDR). Pre-contractual and periodic disclosures are made available to investors "
+         "in accordance with the applicable regulatory requirements.",
+         ""],
+        # CL02 — liste (puces)
+        ["CL02", 1, "Monitor and engage with investee companies on ESG matters.", ""],
+        ["CL02", 2, "Exercise voting rights in accordance with the Stewardship Policy.", ""],
+        ["CL02", 3, "Disclose engagement and voting outcomes in the annual report.", ""],
+        # CL03 — sous_titres
+        ["CL03", 1,
+         "Equity fund status",
+         "At least 51% of the Compartment's assets consist of equity participations "
+         "within the meaning of the German Investment Tax Act (InvStG)."],
+        ["CL03", 2,
+         "Mixed fund status",
+         "At least 25% of the Compartment's assets consist of equity participations "
+         "within the meaning of the German Investment Tax Act (InvStG)."],
+    ]
+    for row in sample_content:
+        ws2.append(row)
+
+    _style_header(ws2, {"A": 10, "B": 8, "C": 55, "D": 55})
+
+    # ── Sheet "mapping" ───────────────────────────────────────────────────────
+    ws3 = wb.create_sheet("mapping")
     clause_ids = [r[0] for r in sample_clauses]
-    ws2.append(["Compartiment"] + clause_ids)
+    ws3.append(["Compartiment"] + clause_ids)
 
     sample_mapping = [
         ["CPR Invest \u2013 Silver Age",  "X", "X", ""],
         ["CPR Invest \u2013 Reactive",    "X", "X", "X"],
     ]
     for row in sample_mapping:
-        ws2.append(row)
+        ws3.append(row)
 
-    # Style header row
-    for cell in ws2[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="D9E1F2")
-    ws2.column_dimensions["A"].width = 45
-    for col in ["B", "C", "D"]:
-        ws2.column_dimensions[col].width = 8
-
-    # Center the X cells
-    for row in ws2.iter_rows(min_row=2):
+    _style_header(ws3, {"A": 32, "B": 8, "C": 8, "D": 8})
+    for row in ws3.iter_rows(min_row=2):
         for cell in row[1:]:
             cell.alignment = Alignment(horizontal="center")
 
