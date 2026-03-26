@@ -55,12 +55,13 @@ def _collect_insertions(input_docx, input_excel, log):
 
             insert_idx = find_insert_idx(
                 paragraphs, anchor_idx, comp["end"], clause["position"])
-            body_ref = find_body_ref(paragraphs, comp["start"], comp["end"])
+            body_ref  = find_body_ref(paragraphs, comp["start"], comp["end"])
             log(f"  ✓ {clause_id} [{clause['type']}]: insert after para #{insert_idx} "
                 f"'{paragraphs[insert_idx].text[:60]}'"
                 + (f"  [{clause['position']}]" if clause["position"] != "apres_titre" else ""))
             insertions.append((
-                insert_idx,
+                insert_idx,          # where to insert (last para of section)
+                anchor_idx,          # style reference (colored section title)
                 clause["title"],
                 clause["type"],
                 clause["content"],
@@ -105,10 +106,11 @@ def run(input_docx, input_excel, output_docx, output_review=None,
 
     reset_counter()
     log(f"\nInserting {len(insertions)} clause(s) [normal]…")
-    for anchor_idx, title, typ, content, body_ref in insertions:
+    for insert_idx, anchor_idx, title, typ, content, body_ref in insertions:
         insert_clause_after(
-            paragraphs[anchor_idx], title, typ, content,
-            body_ref, bullet_ref, review=False)
+            paragraphs[insert_idx], title, typ, content,
+            body_ref, bullet_ref, review=False,
+            title_style_para=paragraphs[anchor_idx])
 
     log(f"Saving normal  → {output_docx}")
     doc.save(output_docx)
@@ -121,10 +123,11 @@ def run(input_docx, input_excel, output_docx, output_review=None,
         bullet_ref_r = find_bullet_ref(doc_r)
 
         reset_counter()
-        for anchor_idx, title, typ, content, body_ref in insertions_r:
+        for insert_idx, anchor_idx, title, typ, content, body_ref in insertions_r:
             insert_clause_after(
-                paras_r[anchor_idx], title, typ, content,
-                body_ref, bullet_ref_r, review=True)
+                paras_r[insert_idx], title, typ, content,
+                body_ref, bullet_ref_r, review=True,
+                title_style_para=paras_r[anchor_idx])
 
         log(f"Saving review  → {output_review}")
         doc_r.save(output_review)

@@ -170,7 +170,8 @@ def _make_bullet(ref_bullet, ref_body, text, review=False):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
-                         body_ref_para, bullet_ref_para=None, review=False):
+                         body_ref_para, bullet_ref_para=None, review=False,
+                         title_style_para=None):
     """
     Inserts a clause block immediately after anchor_para.
 
@@ -181,19 +182,21 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
         sous_titres : [{"texte": "Sub A", "sous_texte": "Body A"}, ...]
 
     Formatting references:
-        title / blank / subtitle  ← anchor_para  (section-title style)
-        body text                 ← body_ref_para (first normal body para)
-        bullet pPr                ← bullet_ref_para (List Paragraph)
+        title / blank        ← title_style_para (colored section title anchor)
+                               falls back to anchor_para if not provided
+        body text            ← body_ref_para (first normal body para)
+        bullet pPr           ← bullet_ref_para (List Paragraph)
 
     review=True  → w:ins track-changes markup
     """
     make        = _make_para_review if review else _make_para
     bullet_ref  = bullet_ref_para or body_ref_para
+    title_ref   = title_style_para if title_style_para is not None else anchor_para
 
     # Build paragraphs in final display order
     elements = []
-    elements.append(make(anchor_para, "", None))           # leading blank
-    elements.append(make(anchor_para, clause_title, True)) # clause title (bold)
+    elements.append(make(title_ref, "", None))           # leading blank
+    elements.append(make(title_ref, clause_title, True)) # clause title (bold, colored)
 
     if clause_type == "texte":
         text = (
@@ -219,7 +222,7 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             elements.append(make(body_ref_para, st, True))
             elements.append(make(body_ref_para, body_text, False))
 
-    elements.append(make(anchor_para, "", None))           # trailing blank
+    elements.append(make(title_ref, "", None))             # trailing blank
 
     # Insert all in reverse order so final order is preserved
     ref_elem = anchor_para._element
