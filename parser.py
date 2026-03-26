@@ -1,4 +1,5 @@
 import re
+from docx.oxml.ns import qn
 
 SUPPLEMENT_RE = re.compile(r"^SUPPLEMENT\s+\d+\.", re.IGNORECASE)
 
@@ -39,21 +40,45 @@ def find_compartments(doc):
     return compartments
 
 
+def _get_run_color(para):
+    """
+    Returns the explicit w:color val of the first run (e.g. '4472C4'),
+    or None if no direct color is set (inherited / auto).
+    """
+    if not para.runs:
+        return None
+    rPr = para.runs[0]._element.rPr
+    if rPr is None:
+        return None
+    color_elem = rPr.find(qn("w:color"))
+    if color_elem is None:
+        return None
+    val = color_elem.get(qn("w:val"))
+    return None if val in (None, "auto") else val
+
+
 def _is_title_like(para, anchor_para):
     """
-    Heuristic: a paragraph looks like a section title if it shares
-    the same bold formatting as the anchor paragraph.
-    Also catches short lines ending with ':'.
+    A paragraph marks a new section boundary if it matches the anchor's
+    bold state AND its explicit color.
+
+    This correctly handles the pattern:
+        [colored + bold]  ← section title / anchor
+        [black  + bold]   ← sub-points  (same bold, different color → NOT a boundary)
+        [colored + bold]  ← next section title ← boundary ✓
+
+    The old heuristic (endswith ':') caused false positives on sub-points
+    like 'Business Day :' or 'Valuation Day:'.
     """
-    text = para.text.strip()
-    if not text:
+    if not para.text.strip():
         return False
-    if text.endswith(":") and len(text) < 80:
-        return True
-    # Same bold state as anchor
-    anchor_bold = anchor_para.runs[0].bold if anchor_para.runs else False
-    para_bold   = para.runs[0].bold        if para.runs        else False
-    return bool(para_bold) == bool(anchor_bold) and bool(para_bold)
+
+    anchor_bold  = bool(anchor_para.runs[0].bold) if anchor_para.runs else False
+    para_bold    = bool(para.runs[0].bold)         if para.runs        else False
+    anchor_color = _get_run_color(anchor_para)
+    para_color   = _get_run_color(para)
+
+    return para_bold and para_bold == anchor_bold and para_color == anchor_color
 
 
 def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
