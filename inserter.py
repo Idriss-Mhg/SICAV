@@ -313,18 +313,6 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
                 for elem in elements:
                     ref_elem.addprevious(elem)
 
-            # Force a page break at the blank sectPr so the 1-column area
-            # (share-class table) always starts on a fresh page.
-            blank_pPr = ref_elem.find(qn("w:pPr"))
-            if blank_pPr is not None:
-                blank_sect = blank_pPr.find(qn("w:sectPr"))
-                if blank_sect is not None:
-                    type_elem = blank_sect.find(qn("w:type"))
-                    if type_elem is None:
-                        type_elem = OxmlElement("w:type")
-                        blank_sect.insert(0, type_elem)
-                    type_elem.set(qn("w:val"), "nextPage")
-
         else:
             # Content paragraph carries the sectPr (e.g. "T3 USD — Acc §").
             # Move the sectPr to the trailing blank so the clause stays in the
