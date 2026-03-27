@@ -57,6 +57,17 @@ def find_bullet_ref(doc):
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
 
+def _is_continuous_sectPr(pPr_elem):
+    """True if the section break in pPr is a continuous (column-layout) break."""
+    sect_pr = pPr_elem.find(qn("w:sectPr"))
+    if sect_pr is None:
+        return False
+    type_elem = sect_pr.find(qn("w:type"))
+    if type_elem is None:
+        return False
+    return type_elem.get(qn("w:val"), "") == "continuous"
+
+
 def _body_level_elem(para):
     """
     Returns the direct-child-of-body XML element that contains para.
@@ -247,11 +258,18 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
     pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
     has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
 
-    if has_sectPr and anchor_para.text.strip():
-        # Content paragraph that carries the section break (e.g. "T3 USD … §").
-        # addnext() would land in the next section, so instead we move the
-        # w:sectPr onto the trailing blank, then use addnext() normally —
-        # the clause stays in the current section and the break is preserved.
+    if has_sectPr and _is_continuous_sectPr(pPr_elem):
+        # Continuous section break = column-layout transition (multi-column → single).
+        # The narrative content is in the multi-column section; the single-column
+        # section that follows is where the clause must land (before "Main Share
+        # Classes").  Insert AFTER the break so the clause is in the right section.
+        for elem in reversed(elements):
+            ref_elem.addnext(elem)
+
+    elif has_sectPr and anchor_para.text.strip():
+        # Content paragraph that carries a page-break sectPr (e.g. "T3 USD … §").
+        # addnext() would land in the next section, so move w:sectPr to the
+        # trailing blank first — the clause stays in the current section.
         sect_pr = pPr_elem.find(qn("w:sectPr"))
         pPr_elem.remove(sect_pr)
         trailing_pPr = elements[-1].find(qn("w:pPr"))
@@ -263,9 +281,7 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             ref_elem.addnext(elem)
 
     elif has_sectPr:
-        # Empty section-break paragraph (e.g. after a table).
-        # Insert all elements immediately *before* it so they stay in the
-        # current section.  Fixed reference → forward iteration preserves order.
+        # Empty page-break paragraph: insert before it (clause stays in current section).
         for elem in elements:
             ref_elem.addprevious(elem)
 
