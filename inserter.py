@@ -57,6 +57,21 @@ def find_bullet_ref(doc):
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
 
+def _body_level_elem(para):
+    """
+    Returns the direct-child-of-body XML element that contains para.
+    If para is at body level, returns para._element.
+    If para is inside a table cell, walks up and returns the w:tbl ancestor
+    that is a direct child of w:body — so insertion happens after the whole
+    table rather than inside a cell.
+    """
+    elem = para._element
+    while True:
+        parent = elem.getparent()
+        if parent is None or parent.tag == qn("w:body"):
+            return elem
+        elem = parent
+
 def _copy_pPr(ref_para):
     if ref_para._element.pPr is not None:
         return copy.deepcopy(ref_para._element.pPr)
@@ -224,19 +239,21 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
     elements.append(make(title_ref, "", None))             # trailing blank
 
-    # If the insertion-point paragraph carries a section break (w:sectPr inside
-    # its pPr), addnext() would land in the *next* section.  Instead we insert
-    # each element immediately *before* the section-break paragraph, iterating
-    # forward so the final order is preserved.
-    ref_elem = anchor_para._element
-    pPr_elem  = ref_elem.find(qn("w:pPr"))
-    has_sectPr = (pPr_elem is not None
-                  and pPr_elem.find(qn("w:sectPr")) is not None)
+    # Always work at the document-body level so we never insert inside a table
+    # cell (doc.paragraphs includes cell paragraphs; addnext on a cell para
+    # would insert inside the cell instead of after the table).
+    ref_elem = _body_level_elem(anchor_para)
+
+    # If the body-level element is a paragraph carrying a section break
+    # (w:sectPr inside its pPr), addnext() would land in the *next* section.
+    # Fix: insert each element immediately *before* the section-break paragraph
+    # using addprevious(), keeping the reference fixed so order is preserved.
+    pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
+    has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
 
     if has_sectPr:
-        for elem in elements:          # forward order + addprevious
+        for elem in elements:            # forward order, fixed ref → A B C before break
             ref_elem.addprevious(elem)
-            ref_elem = elem            # next sibling goes after this one
     else:
-        for elem in reversed(elements):  # original: reverse + addnext
+        for elem in reversed(elements):  # reversed + addnext → A B C after ref
             ref_elem.addnext(elem)
