@@ -9,7 +9,8 @@ def _collect_insertions(input_docx, input_excel, log):
     """
     Loads the document + mapping, resolves all anchor positions.
     Returns (doc, paragraphs, insertions, warnings) without touching the file.
-    insertions : list of (anchor_idx, clause_title), sorted descending.
+    insertions : list of (insert_idx, anchor_idx, title, typ, content, body_ref, is_exact),
+                 sorted by insert_idx descending so later positions are processed first.
     """
     log("Loading document…")
     doc = Document(input_docx)

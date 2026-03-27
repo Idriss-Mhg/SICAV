@@ -86,6 +86,7 @@ def _body_level_elem(para):
             return elem
         elem = parent
 
+
 def _copy_pPr(ref_para):
     if ref_para._element.pPr is not None:
         return copy.deepcopy(ref_para._element.pPr)
