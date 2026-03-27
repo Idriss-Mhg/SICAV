@@ -317,7 +317,7 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             # Content paragraph carries the sectPr (e.g. "T3 USD — Acc §").
             # Move the sectPr to the trailing blank so the clause stays in the
             # 2-column section and "Main Share Classes" is in 1-column after it.
-            _add_keep_together(elements)
+            _add_keep_together(elements[1:])
             sect_pr = pPr_elem.find(qn("w:sectPr"))
             pPr_elem.remove(sect_pr)
             trailing_pPr = elements[-1].find(qn("w:pPr"))
