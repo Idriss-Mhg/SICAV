@@ -53,12 +53,28 @@ def _collect_insertions(input_docx, input_excel, log):
                 )
                 continue
 
-            insert_idx = find_insert_idx(
-                paragraphs, anchor_idx, comp["end"], clause["position"])
+            # ── Insertion index ───────────────────────────────────────────────
+            if clause["exact_pos"]:
+                # User specified an exact paragraph to insert after (overrides
+                # automatic apres_titre / apres_section detection).
+                insert_idx = find_anchor(
+                    paragraphs, clause["exact_pos"], comp["start"], comp["end"])
+                if insert_idx is None:
+                    warnings.append(
+                        f"  PositionExacte '{clause['exact_pos']}' not found "
+                        f"in '{comp['name']}' — clause '{clause_id}' skipped"
+                    )
+                    continue
+                log(f"  ✓ {clause_id} [{clause['type']}]: exact insert after para "
+                    f"#{insert_idx} '{paragraphs[insert_idx].text[:60]}'")
+            else:
+                insert_idx = find_insert_idx(
+                    paragraphs, anchor_idx, comp["end"], clause["position"])
+                log(f"  ✓ {clause_id} [{clause['type']}]: insert after para #{insert_idx} "
+                    f"'{paragraphs[insert_idx].text[:60]}'"
+                    + (f"  [{clause['position']}]" if clause["position"] != "apres_titre" else ""))
+
             body_ref  = find_body_ref(paragraphs, comp["start"], comp["end"])
-            log(f"  ✓ {clause_id} [{clause['type']}]: insert after para #{insert_idx} "
-                f"'{paragraphs[insert_idx].text[:60]}'"
-                + (f"  [{clause['position']}]" if clause["position"] != "apres_titre" else ""))
             insertions.append((
                 insert_idx,          # where to insert (last para of section)
                 anchor_idx,          # style reference (colored section title)

@@ -97,46 +97,62 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
     """
     Returns the paragraph index AFTER WHICH the clause should be inserted.
 
-    position='apres_titre'   → anchor_idx  (right after the anchor title)
-    position='apres_section' → last body paragraph of the anchor's section,
-                               determined by (in order of priority):
-                               1. A w:sectPr (next-page section break) — always
-                                  present between narrative content and the share-
-                                  classes table → most reliable boundary.
-                               2. First title-like paragraph (color+bold match),
-                                  excluding list items and indented paragraphs.
+    position='apres_titre'   → anchor_idx
+    position='apres_section' → determined by scanning forward:
+
+      Many compartments have this body structure:
+          narrative paras
+          § Next Page          ← ends the text column
+          w:tbl (share-class table)
+          § Continuous         ← transitions multi-col → single-col
+          "Main Share Classes" ← where the clause should land BEFORE
+
+      Strategy:
+        1. Continuous sectPr  → preferred boundary; return its index immediately
+           (inserter will addnext → clause in single-column section ✓)
+        2. Non-continuous sectPr → record as fallback, keep scanning for a
+           subsequent Continuous break
+        3. Title-like paragraph → stop (fallback for sections without breaks)
+      If only non-continuous breaks were found, return the last one as fallback.
     """
     if position != "apres_section":
         return anchor_idx
 
-    anchor_para  = paragraphs[anchor_idx]
-    last_content = anchor_idx
+    anchor_para     = paragraphs[anchor_idx]
+    last_content    = anchor_idx
+    last_sectPr_idx = None   # fallback: last non-continuous sectPr seen
 
     for i in range(anchor_idx + 1, comp_end + 1):
         para = paragraphs[i]
         if _is_in_table(para):
             continue
 
-        # ── Priority 1 : section break → use this paragraph as the anchor ──
-        # We return the sectPr paragraph itself (index i) so the inserter can
-        # decide how to handle it:
-        #   • has text  → move sectPr to trailing blank, addnext()
-        #   • no text   → addprevious() (content lands before the break)
         pPr = para._element.pPr
         if pPr is not None and pPr.find(qn("w:sectPr")) is not None:
+            sect_pr   = pPr.find(qn("w:sectPr"))
+            type_elem = sect_pr.find(qn("w:type"))
+            is_cont   = (type_elem is not None
+                         and type_elem.get(qn("w:val")) == "continuous")
+
+            if is_cont:
+                return i              # Continuous = best boundary, stop here
+
+            # Non-continuous (nextPage / evenPage / oddPage): record & keep going
             if para.text.strip():
-                last_content = i   # T3-USD-style: the text belongs to this section
-            return i               # always return the sectPr paragraph
+                last_content = i
+            last_sectPr_idx = i
+            continue                  # look for a subsequent Continuous break
 
         if not para.text.strip():
             continue
 
-        # ── Priority 2 : next same-level title ────────────────────────────────
         if _is_title_like(para, anchor_para):
             break
 
         last_content = i
 
+    if last_sectPr_idx is not None:
+        return last_sectPr_idx
     return last_content
 
 

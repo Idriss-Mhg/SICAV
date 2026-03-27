@@ -24,11 +24,12 @@ def load_mapping(excel_path):
     for row in ws_clauses.iter_rows(min_row=2, values_only=True):
         if not row[0]:
             continue
-        clause_id = str(row[0]).strip()
-        title     = str(row[1]).strip() if row[1] else ""
-        anchor    = str(row[2]).strip() if row[2] else ""
-        pos       = str(row[3]).strip().lower() if len(row) > 3 and row[3] else "apres_titre"
-        typ       = str(row[4]).strip().lower() if len(row) > 4 and row[4] else "texte"
+        clause_id  = str(row[0]).strip()
+        title      = str(row[1]).strip() if row[1] else ""
+        anchor     = str(row[2]).strip() if row[2] else ""
+        pos        = str(row[3]).strip().lower() if len(row) > 3 and row[3] else "apres_titre"
+        typ        = str(row[4]).strip().lower() if len(row) > 4 and row[4] else "texte"
+        exact_pos  = str(row[5]).strip() if len(row) > 5 and row[5] else ""
 
         if pos not in VALID_POSITIONS:
             pos = "apres_titre"
@@ -36,11 +37,12 @@ def load_mapping(excel_path):
             typ = "texte"
 
         clauses[clause_id] = {
-            "title":    title,
-            "anchor":   anchor,
-            "position": pos,
-            "type":     typ,
-            "content":  [],   # filled below from "contenu" sheet
+            "title":     title,
+            "anchor":    anchor,
+            "position":  pos,
+            "type":      typ,
+            "content":   [],   # filled below from "contenu" sheet
+            "exact_pos": exact_pos,  # optional: overrides automatic position detection
         }
 
     # ── Sheet "contenu" (optional) ────────────────────────────────────────────

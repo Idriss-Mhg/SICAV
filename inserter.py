@@ -281,9 +281,17 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             ref_elem.addnext(elem)
 
     elif has_sectPr:
-        # Empty page-break paragraph: insert before it (clause stays in current section).
+        # Empty page-break paragraph.  The table often sits between the last
+        # narrative paragraph and this sectPr in the body XML, so inserting
+        # addprevious(sectPr) would land AFTER the table.  Walk backward past
+        # any table to insert before it instead.
+        target   = ref_elem
+        look     = ref_elem.getprevious()
+        while look is not None and look.tag == qn("w:tbl"):
+            target = look
+            look   = look.getprevious()
         for elem in elements:
-            ref_elem.addprevious(elem)
+            target.addprevious(elem)
 
     else:
         for elem in reversed(elements):  # normal case
