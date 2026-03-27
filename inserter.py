@@ -288,20 +288,37 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             ref_elem.addprevious(elem)
 
     elif is_2col:
-        # 2-column → 1-column transition.  The clause must stay in the
-        # 2-column section.  Use w:keepNext on every paragraph except the
-        # last so Word keeps the whole block in one column — no hard column
-        # break, no blank spaces.
-        _add_keep_together(elements)
-
         if not anchor_para.text.strip():
-            # Blank paragraph carries the sectPr: insert all elements before it.
-            for elem in elements:
-                ref_elem.addprevious(elem)
+            # Blank paragraph carries the sectPr.
+            # Walk backwards from the sectPr paragraph to find the last non-blank
+            # body-level element (paragraph or table), then insert after it.
+            # This avoids placing the clause after pre-existing trailing blanks.
+            # Exclude the leading blank from keepNext so Word can use it to
+            # balance the two columns (avoids the large empty-space problem).
+            _add_keep_together(elements[1:])
+
+            pivot = ref_elem.getprevious()
+            while pivot is not None:
+                if pivot.tag == qn("w:tbl"):
+                    break
+                if pivot.tag == qn("w:p"):
+                    if "".join(t.text or "" for t in pivot.iter(qn("w:t"))).strip():
+                        break
+                pivot = pivot.getprevious()
+
+            if pivot is not None:
+                for elem in reversed(elements):
+                    pivot.addnext(elem)
+            else:
+                # Fallback: no non-blank predecessor found, insert before sectPr.
+                for elem in elements:
+                    ref_elem.addprevious(elem)
+
         else:
             # Content paragraph carries the sectPr (e.g. "T3 USD — Acc §").
             # Move the sectPr to the trailing blank so the clause stays in the
             # 2-column section and "Main Share Classes" is in 1-column after it.
+            _add_keep_together(elements)
             sect_pr = pPr_elem.find(qn("w:sectPr"))
             pPr_elem.remove(sect_pr)
             trailing_pPr = elements[-1].find(qn("w:pPr"))
