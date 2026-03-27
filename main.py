@@ -76,12 +76,13 @@ def _collect_insertions(input_docx, input_excel, log):
 
             body_ref  = find_body_ref(paragraphs, comp["start"], comp["end"])
             insertions.append((
-                insert_idx,          # where to insert (last para of section)
-                anchor_idx,          # style reference (colored section title)
+                insert_idx,                    # where to insert (last para of section)
+                anchor_idx,                    # style reference (colored section title)
                 clause["title"],
                 clause["type"],
                 clause["content"],
                 body_ref,
+                bool(clause["exact_pos"]),     # is_exact: bypass sectPr logic
             ))
 
     insertions.sort(key=lambda x: x[0], reverse=True)
@@ -122,11 +123,12 @@ def run(input_docx, input_excel, output_docx, output_review=None,
 
     reset_counter()
     log(f"\nInserting {len(insertions)} clause(s) [normal]…")
-    for insert_idx, anchor_idx, title, typ, content, body_ref in insertions:
+    for insert_idx, anchor_idx, title, typ, content, body_ref, is_exact in insertions:
         insert_clause_after(
             paragraphs[insert_idx], title, typ, content,
             body_ref, bullet_ref, review=False,
-            title_style_para=paragraphs[anchor_idx])
+            title_style_para=paragraphs[anchor_idx],
+            exact=is_exact)
 
     log(f"Saving normal  → {output_docx}")
     doc.save(output_docx)
@@ -139,11 +141,12 @@ def run(input_docx, input_excel, output_docx, output_review=None,
         bullet_ref_r = find_bullet_ref(doc_r)
 
         reset_counter()
-        for insert_idx, anchor_idx, title, typ, content, body_ref in insertions_r:
+        for insert_idx, anchor_idx, title, typ, content, body_ref, is_exact in insertions_r:
             insert_clause_after(
                 paras_r[insert_idx], title, typ, content,
                 body_ref, bullet_ref_r, review=True,
-                title_style_para=paras_r[anchor_idx])
+                title_style_para=paras_r[anchor_idx],
+                exact=is_exact)
 
         log(f"Saving review  → {output_review}")
         doc_r.save(output_review)

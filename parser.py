@@ -135,13 +135,21 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
                          and type_elem.get(qn("w:val")) == "continuous")
 
             if is_cont:
-                return i              # Continuous = best boundary, stop here
+                return i              # Continuous = preferred boundary, stop here
 
-            # Non-continuous (nextPage / evenPage / oddPage): record & keep going
+            # Non-continuous (nextPage / evenPage / oddPage):
             if para.text.strip():
-                last_content = i
-            last_sectPr_idx = i
-            continue                  # look for a subsequent Continuous break
+                # Content paragraph carrying the break (e.g. "T3 USD … §nextPage").
+                # This is the definitive end of the section — stop scanning.
+                last_content    = i
+                last_sectPr_idx = i
+                break             # ← break, not continue
+            else:
+                # Empty page-break paragraph: the section may extend to the next
+                # page (e.g. two-column layout continues there).  Keep scanning
+                # for a subsequent Continuous break.
+                last_sectPr_idx = i
+                continue
 
         if not para.text.strip():
             continue

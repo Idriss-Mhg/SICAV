@@ -197,7 +197,7 @@ def _make_bullet(ref_bullet, ref_body, text, review=False):
 
 def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
                          body_ref_para, bullet_ref_para=None, review=False,
-                         title_style_para=None):
+                         title_style_para=None, exact=False):
     """
     Inserts a clause block immediately after anchor_para.
 
@@ -258,7 +258,12 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
     pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
     has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
 
-    if has_sectPr and _is_continuous_sectPr(pPr_elem):
+    if exact:
+        # PositionExacte: always insert immediately after the specified paragraph.
+        for elem in reversed(elements):
+            ref_elem.addnext(elem)
+
+    elif has_sectPr and _is_continuous_sectPr(pPr_elem):
         # Continuous section break = column-layout transition (multi-column → single).
         # The narrative content is in the multi-column section; the single-column
         # section that follows is where the clause must land (before "Main Share
