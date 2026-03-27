@@ -57,6 +57,20 @@ def find_bullet_ref(doc):
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
 
+def _is_multicolumn_sectPr(pPr_elem):
+    """True if the sectPr ending at this paragraph defines a multi-column section."""
+    sect_pr = pPr_elem.find(qn("w:sectPr"))
+    if sect_pr is None:
+        return False
+    cols = sect_pr.find(qn("w:cols"))
+    if cols is None:
+        return False
+    try:
+        return int(cols.get(qn("w:num"), "1")) > 1
+    except (ValueError, TypeError):
+        return False
+
+
 def _body_level_elem(para):
     """
     Returns the direct-child-of-body XML element that contains para.
@@ -136,6 +150,30 @@ def _wrap_ins(run_elem):
     w_ins.set(qn("w:date"),   REVIEW_DATE)
     w_ins.append(run_elem)
     return w_ins
+
+
+def _make_column_break(ref_para, review=False):
+    """
+    Paragraph containing only a w:br type='column'.
+    Forces the following content to start at the top of the next column,
+    preventing the clause from being split across columns.
+    """
+    p = OxmlElement("w:p")
+    pPr = _copy_pPr(ref_para)
+    if pPr is None:
+        pPr = OxmlElement("w:pPr")
+    if review:
+        _mark_pPr_ins(pPr)
+    p.append(pPr)
+    r = OxmlElement("w:r")
+    if review:
+        rPr = _copy_rPr(ref_para)
+        r.append(rPr)
+    br = OxmlElement("w:br")
+    br.set(qn("w:type"), "column")
+    r.append(br)
+    p.append(_wrap_ins(r) if review else r)
+    return p
 
 
 # ── Paragraph factories ───────────────────────────────────────────────────────
@@ -244,37 +282,40 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
     pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
     has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
+    is_2col    = has_sectPr and _is_multicolumn_sectPr(pPr_elem)
 
     if exact:
-        # PositionExacte: user named the first paragraph of the next chapter
-        # → insert BEFORE it.
+        # PositionExacte: insert BEFORE the named paragraph.
         for elem in elements:
             ref_elem.addprevious(elem)
 
-    elif has_sectPr and not anchor_para.text.strip():
-        # Blank paragraph carrying a sectPr (common pattern: last content para
-        # has no sectPr, then a standalone blank carries the section boundary).
-        # Insert BEFORE it so the clause stays in the current (2-column) section.
-        for elem in elements:
-            ref_elem.addprevious(elem)
+    elif is_2col:
+        # 2-column → 1-column transition.  The clause must stay in the
+        # 2-column section.  Prepend a column break so the clause always
+        # starts at the top of a fresh column (prevents splitting when both
+        # columns are already partially filled).
+        col_break = _make_column_break(title_ref, review=review)
+        all_elems = [col_break] + elements
 
-    elif has_sectPr:
-        # Content paragraph carrying a sectPr (e.g. "T3 USD — Acc §").
-        # addnext would push the clause into the next (1-column) section.
-        # Move the sectPr onto the clause's trailing blank, then addnext:
-        # the clause lands in the 2-column section; "Main Share Classes"
-        # remains in the 1-column section after the trailing blank.
-        sect_pr = pPr_elem.find(qn("w:sectPr"))
-        pPr_elem.remove(sect_pr)
-        trailing_pPr = elements[-1].find(qn("w:pPr"))
-        if trailing_pPr is None:
-            trailing_pPr = OxmlElement("w:pPr")
-            elements[-1].insert(0, trailing_pPr)
-        trailing_pPr.append(sect_pr)
-        for elem in reversed(elements):
-            ref_elem.addnext(elem)
+        if not anchor_para.text.strip():
+            # Blank paragraph carries the sectPr: insert all elements before it.
+            for elem in all_elems:
+                ref_elem.addprevious(elem)
+        else:
+            # Content paragraph carries the sectPr (e.g. "T3 USD — Acc §").
+            # Move the sectPr to the trailing blank so the clause stays in the
+            # 2-column section and "Main Share Classes" is in 1-column after it.
+            sect_pr = pPr_elem.find(qn("w:sectPr"))
+            pPr_elem.remove(sect_pr)
+            trailing_pPr = elements[-1].find(qn("w:pPr"))
+            if trailing_pPr is None:
+                trailing_pPr = OxmlElement("w:pPr")
+                elements[-1].insert(0, trailing_pPr)
+            trailing_pPr.append(sect_pr)
+            for elem in reversed(all_elems):
+                ref_elem.addnext(elem)
 
     else:
-        # Normal case (apres_titre, or apres_section without a sectPr).
+        # Normal case (apres_titre, or apres_section without a 2-col sectPr).
         for elem in reversed(elements):
             ref_elem.addnext(elem)
