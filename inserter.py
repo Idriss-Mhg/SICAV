@@ -242,24 +242,17 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
     # Always work at document-body level (avoids inserting inside table cells).
     ref_elem = _body_level_elem(anchor_para)
 
-    pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
-    has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
-
-    if exact or has_sectPr:
-        # PositionExacte OR sectPr paragraph: insert BEFORE.
-        #
+    if exact:
         # PositionExacte: user names the first paragraph of the next chapter
-        # → clause lands just before it.
-        #
-        # sectPr (nextPage): inserting BEFORE keeps the clause inside the
-        # current section — and its column layout (1-col or 2-col).  The
-        # existing page break then separates the clause from "Main Share
-        # Classes" on the next page.  addnext would push the clause into the
-        # next (single-column) section instead.
+        # → insert BEFORE it.
         for elem in elements:
             ref_elem.addprevious(elem)
     else:
-        # Normal case (apres_titre, or apres_section without a sectPr):
-        # insert immediately after the reference paragraph.
+        # apres_titre / apres_section — always addnext.
+        #
+        # When insert_idx points to a paragraph carrying a w:sectPr continuous
+        # (cols=2 → 1-col transition), addnext places the clause AFTER the
+        # break, in the 1-column section, immediately before "Main Share
+        # Classes".  That is the correct position.
         for elem in reversed(elements):
             ref_elem.addnext(elem)
