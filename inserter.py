@@ -242,17 +242,39 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
     # Always work at document-body level (avoids inserting inside table cells).
     ref_elem = _body_level_elem(anchor_para)
 
+    pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
+    has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
+
     if exact:
-        # PositionExacte: user names the first paragraph of the next chapter
+        # PositionExacte: user named the first paragraph of the next chapter
         # → insert BEFORE it.
         for elem in elements:
             ref_elem.addprevious(elem)
+
+    elif has_sectPr and not anchor_para.text.strip():
+        # Blank paragraph carrying a sectPr (common pattern: last content para
+        # has no sectPr, then a standalone blank carries the section boundary).
+        # Insert BEFORE it so the clause stays in the current (2-column) section.
+        for elem in elements:
+            ref_elem.addprevious(elem)
+
+    elif has_sectPr:
+        # Content paragraph carrying a sectPr (e.g. "T3 USD — Acc §").
+        # addnext would push the clause into the next (1-column) section.
+        # Move the sectPr onto the clause's trailing blank, then addnext:
+        # the clause lands in the 2-column section; "Main Share Classes"
+        # remains in the 1-column section after the trailing blank.
+        sect_pr = pPr_elem.find(qn("w:sectPr"))
+        pPr_elem.remove(sect_pr)
+        trailing_pPr = elements[-1].find(qn("w:pPr"))
+        if trailing_pPr is None:
+            trailing_pPr = OxmlElement("w:pPr")
+            elements[-1].insert(0, trailing_pPr)
+        trailing_pPr.append(sect_pr)
+        for elem in reversed(elements):
+            ref_elem.addnext(elem)
+
     else:
-        # apres_titre / apres_section — always addnext.
-        #
-        # When insert_idx points to a paragraph carrying a w:sectPr continuous
-        # (cols=2 → 1-col transition), addnext places the clause AFTER the
-        # break, in the 1-column section, immediately before "Main Share
-        # Classes".  That is the correct position.
+        # Normal case (apres_titre, or apres_section without a sectPr).
         for elem in reversed(elements):
             ref_elem.addnext(elem)
