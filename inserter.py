@@ -57,17 +57,6 @@ def find_bullet_ref(doc):
 
 # ── Low-level XML helpers ─────────────────────────────────────────────────────
 
-def _is_continuous_sectPr(pPr_elem):
-    """True if the section break in pPr is a continuous (column-layout) break."""
-    sect_pr = pPr_elem.find(qn("w:sectPr"))
-    if sect_pr is None:
-        return False
-    type_elem = sect_pr.find(qn("w:type"))
-    if type_elem is None:
-        return False
-    return type_elem.get(qn("w:val"), "") == "continuous"
-
-
 def _body_level_elem(para):
     """
     Returns the direct-child-of-body XML element that contains para.
@@ -250,54 +239,27 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
     elements.append(make(title_ref, "", None))             # trailing blank
 
-    # Always work at the document-body level so we never insert inside a table
-    # cell (doc.paragraphs includes cell paragraphs; addnext on a cell para
-    # would insert inside the cell instead of after the table).
+    # Always work at document-body level (avoids inserting inside table cells).
     ref_elem = _body_level_elem(anchor_para)
 
     pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
     has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
 
-    if exact:
-        # PositionExacte: always insert immediately after the specified paragraph.
-        for elem in reversed(elements):
-            ref_elem.addnext(elem)
-
-    elif has_sectPr and _is_continuous_sectPr(pPr_elem):
-        # Continuous section break = column-layout transition (multi-column → single).
-        # The narrative content is in the multi-column section; the single-column
-        # section that follows is where the clause must land (before "Main Share
-        # Classes").  Insert AFTER the break so the clause is in the right section.
-        for elem in reversed(elements):
-            ref_elem.addnext(elem)
-
-    elif has_sectPr and anchor_para.text.strip():
-        # Content paragraph that carries a page-break sectPr (e.g. "T3 USD … §").
-        # addnext() would land in the next section, so move w:sectPr to the
-        # trailing blank first — the clause stays in the current section.
-        sect_pr = pPr_elem.find(qn("w:sectPr"))
-        pPr_elem.remove(sect_pr)
-        trailing_pPr = elements[-1].find(qn("w:pPr"))
-        if trailing_pPr is None:
-            trailing_pPr = OxmlElement("w:pPr")
-            elements[-1].insert(0, trailing_pPr)
-        trailing_pPr.append(sect_pr)
-        for elem in reversed(elements):
-            ref_elem.addnext(elem)
-
-    elif has_sectPr:
-        # Empty page-break paragraph.  The table often sits between the last
-        # narrative paragraph and this sectPr in the body XML, so inserting
-        # addprevious(sectPr) would land AFTER the table.  Walk backward past
-        # any table to insert before it instead.
-        target   = ref_elem
-        look     = ref_elem.getprevious()
-        while look is not None and look.tag == qn("w:tbl"):
-            target = look
-            look   = look.getprevious()
+    if exact or has_sectPr:
+        # PositionExacte OR sectPr paragraph: insert BEFORE.
+        #
+        # PositionExacte: user names the first paragraph of the next chapter
+        # → clause lands just before it.
+        #
+        # sectPr (nextPage): inserting BEFORE keeps the clause inside the
+        # current section — and its column layout (1-col or 2-col).  The
+        # existing page break then separates the clause from "Main Share
+        # Classes" on the next page.  addnext would push the clause into the
+        # next (single-column) section instead.
         for elem in elements:
-            target.addprevious(elem)
-
+            ref_elem.addprevious(elem)
     else:
-        for elem in reversed(elements):  # normal case
+        # Normal case (apres_titre, or apres_section without a sectPr):
+        # insert immediately after the reference paragraph.
+        for elem in reversed(elements):
             ref_elem.addnext(elem)

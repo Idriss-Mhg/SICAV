@@ -65,7 +65,7 @@ def _collect_insertions(input_docx, input_excel, log):
                         f"in '{comp['name']}' — clause '{clause_id}' skipped"
                     )
                     continue
-                log(f"  ✓ {clause_id} [{clause['type']}]: exact insert after para "
+                log(f"  ✓ {clause_id} [{clause['type']}]: exact insert BEFORE para "
                     f"#{insert_idx} '{paragraphs[insert_idx].text[:60]}'")
             else:
                 insert_idx = find_insert_idx(

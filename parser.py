@@ -40,87 +40,28 @@ def find_compartments(doc):
     return compartments
 
 
-def _get_run_color(para):
-    """
-    Returns the explicit w:color val of the first run (e.g. '4472C4'),
-    or None if no direct color is set (inherited / auto).
-    """
-    if not para.runs:
-        return None
-    rPr = para.runs[0]._element.rPr
-    if rPr is None:
-        return None
-    color_elem = rPr.find(qn("w:color"))
-    if color_elem is None:
-        return None
-    val = color_elem.get(qn("w:val"))
-    return None if val in (None, "auto") else val
-
-
 def _is_in_table(para):
     """True if the paragraph lives inside a table cell rather than the document body."""
     parent = para._element.getparent()
     return parent is not None and parent.tag != qn("w:body")
 
 
-def _is_title_like(para, anchor_para):
-    """
-    A paragraph marks a new section boundary if it matches the anchor's
-    bold state AND its explicit color AND is not a list/indented item.
-    """
-    if not para.text.strip():
-        return False
-
-    # List items and indented paragraphs are sub-content, never section boundaries.
-    pPr = para._element.pPr
-    if pPr is not None:
-        if pPr.find(qn("w:numPr")) is not None:
-            return False
-        ind = pPr.find(qn("w:ind"))
-        if ind is not None:
-            left = ind.get(qn("w:left")) or ind.get(qn("w:start")) or "0"
-            try:
-                if int(left) > 0:
-                    return False
-            except ValueError:
-                pass
-
-    anchor_bold  = bool(anchor_para.runs[0].bold) if anchor_para.runs else False
-    para_bold    = bool(para.runs[0].bold)         if para.runs        else False
-    anchor_color = _get_run_color(anchor_para)
-    para_color   = _get_run_color(para)
-
-    return para_bold and para_bold == anchor_bold and para_color == anchor_color
-
-
 def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
     """
     Returns the paragraph index AFTER WHICH the clause should be inserted.
 
-    position='apres_titre'   → anchor_idx
-    position='apres_section' → determined by scanning forward:
-
-      Many compartments have this body structure:
-          narrative paras
-          § Next Page          ← ends the text column
-          w:tbl (share-class table)
-          § Continuous         ← transitions multi-col → single-col
-          "Main Share Classes" ← where the clause should land BEFORE
-
-      Strategy:
-        1. Continuous sectPr  → preferred boundary; return its index immediately
-           (inserter will addnext → clause in single-column section ✓)
-        2. Non-continuous sectPr → record as fallback, keep scanning for a
-           subsequent Continuous break
-        3. Title-like paragraph → stop (fallback for sections without breaks)
-      If only non-continuous breaks were found, return the last one as fallback.
+    position='apres_titre'   → anchor_idx (immediately after the anchor title)
+    position='apres_section' → scans forward from anchor until the first w:sectPr
+                               paragraph (any type); addnext on that paragraph
+                               places the clause on the other side of the break
+                               (next page / next section), before the share-class
+                               table.  Falls back to the last non-blank paragraph
+                               if no sectPr is found in the compartment.
     """
     if position != "apres_section":
         return anchor_idx
 
-    anchor_para     = paragraphs[anchor_idx]
-    last_content    = anchor_idx
-    last_sectPr_idx = None   # fallback: last non-continuous sectPr seen
+    last_content = anchor_idx
 
     for i in range(anchor_idx + 1, comp_end + 1):
         para = paragraphs[i]
@@ -129,38 +70,11 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
 
         pPr = para._element.pPr
         if pPr is not None and pPr.find(qn("w:sectPr")) is not None:
-            sect_pr   = pPr.find(qn("w:sectPr"))
-            type_elem = sect_pr.find(qn("w:type"))
-            is_cont   = (type_elem is not None
-                         and type_elem.get(qn("w:val")) == "continuous")
+            return i  # addnext here → clause lands after the break
 
-            if is_cont:
-                return i              # Continuous = preferred boundary, stop here
+        if para.text.strip():
+            last_content = i
 
-            # Non-continuous (nextPage / evenPage / oddPage):
-            if para.text.strip():
-                # Content paragraph carrying the break (e.g. "T3 USD … §nextPage").
-                # This is the definitive end of the section — stop scanning.
-                last_content    = i
-                last_sectPr_idx = i
-                break             # ← break, not continue
-            else:
-                # Empty page-break paragraph: the section may extend to the next
-                # page (e.g. two-column layout continues there).  Keep scanning
-                # for a subsequent Continuous break.
-                last_sectPr_idx = i
-                continue
-
-        if not para.text.strip():
-            continue
-
-        if _is_title_like(para, anchor_para):
-            break
-
-        last_content = i
-
-    if last_sectPr_idx is not None:
-        return last_sectPr_idx
     return last_content
 
 
