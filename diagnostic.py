@@ -13,6 +13,87 @@ from mapping import load_mapping
 from parser import find_compartments, find_anchor, find_insert_idx, _is_in_table
 
 
+# ── Body-structure helpers ────────────────────────────────────────────────────
+
+def _build_body_map(doc):
+    """
+    Returns (body_children, para_to_body_pos, body_pos_to_para).
+
+    body_children     : list of direct w:body child elements (w:p and w:tbl)
+    para_to_body_pos  : {para._element: index_in_body_children}
+    body_pos_to_para  : {index_in_body_children: para_index_in_doc.paragraphs}
+    """
+    body = doc.element.body
+    body_children = list(body)
+    para_to_body_pos = {}
+    body_pos_to_para = {}
+
+    para_idx = 0
+    for bi, child in enumerate(body_children):
+        if child.tag == qn("w:p"):
+            para_to_body_pos[child] = bi
+            body_pos_to_para[bi] = para_idx
+            para_idx += 1
+        elif child.tag == qn("w:tbl"):
+            # Count all paragraphs inside the table cells
+            for tc_p in child.iter(qn("w:p")):
+                para_to_body_pos[tc_p] = bi   # all point to the table's body pos
+                body_pos_to_para.setdefault(bi, para_idx)  # first para of table
+                para_idx += 1
+
+    return body_children, para_to_body_pos, body_pos_to_para
+
+
+def dump_body_structure(doc, paragraphs, comp_start, comp_end):
+    """
+    Shows the raw sequence of paragraphs and tables in the document body
+    for the given compartment range.  Useful for understanding why insertions
+    land in the wrong place relative to tables.
+    """
+    body = doc.element.body
+    body_children = list(body)
+
+    # Build para_element → para_index map (body-level paragraphs only)
+    elem_to_idx = {}
+    idx = 0
+    for child in body_children:
+        if child.tag == qn("w:p"):
+            elem_to_idx[id(child)] = idx
+            idx += 1
+        elif child.tag == qn("w:tbl"):
+            for tc_p in child.iter(qn("w:p")):
+                idx += 1   # count but don't map (table-cell paras)
+
+    # Find body-children range that overlaps [comp_start, comp_end]
+    print("\n  --- Body-level structure (paragraphs + tables) ---")
+    cur_para = 0
+    in_range = False
+    for bi, child in enumerate(body_children):
+        if child.tag == qn("w:p"):
+            is_comp = comp_start <= cur_para <= comp_end
+            if is_comp:
+                in_range = True
+                si = _sect_info(paragraphs[cur_para])
+                text = repr(paragraphs[cur_para].text.strip()[:60] or "(blank)")
+                print(f"  P[{cur_para:5d}] {text}{si}")
+            elif in_range:
+                break   # past compartment end
+            cur_para += 1
+        elif child.tag == qn("w:tbl"):
+            # Count table-cell paragraphs
+            tc_paras = list(child.iter(qn("w:p")))
+            tc_count = len(tc_paras)
+            if tc_paras:
+                first_text = "".join(
+                    t.text or "" for t in tc_paras[0].iter(qn("w:t")))
+            else:
+                first_text = ""
+            if in_range:
+                print(f"  {'':7}[TABLE  {tc_count} cell-paras, "
+                      f"first: {repr(first_text[:40])}]")
+            cur_para += tc_count
+
+
 def _sect_info(para):
     pPr = para._element.pPr
     if pPr is None:
@@ -96,6 +177,9 @@ def dump_compartment(doc, paragraphs, clauses, mapping, comp):
             print()
     if not found:
         print("  (none found)")
+
+    # Show body-level structure (paragraphs + tables)
+    dump_body_structure(doc, paragraphs, comp["start"], comp["end"])
 
 
 def main():

@@ -152,28 +152,25 @@ def _wrap_ins(run_elem):
     return w_ins
 
 
-def _make_column_break(ref_para, review=False):
-    """
-    Paragraph containing only a w:br type='column'.
-    Forces the following content to start at the top of the next column,
-    preventing the clause from being split across columns.
-    """
-    p = OxmlElement("w:p")
-    pPr = _copy_pPr(ref_para)
+def _ensure_pPr(p_elem):
+    """Get or create w:pPr for a paragraph element."""
+    pPr = p_elem.find(qn("w:pPr"))
     if pPr is None:
         pPr = OxmlElement("w:pPr")
-    if review:
-        _mark_pPr_ins(pPr)
-    p.append(pPr)
-    r = OxmlElement("w:r")
-    if review:
-        rPr = _copy_rPr(ref_para)
-        r.append(rPr)
-    br = OxmlElement("w:br")
-    br.set(qn("w:type"), "column")
-    r.append(br)
-    p.append(_wrap_ins(r) if review else r)
-    return p
+        p_elem.insert(0, pPr)
+    return pPr
+
+
+def _add_keep_together(elements):
+    """
+    Add w:keepNext to every paragraph except the last so Word keeps the
+    whole clause block in the same column (no mid-clause column break).
+    w:keepNext prevents both page and column breaks between paragraphs.
+    """
+    for elem in elements[:-1]:
+        pPr = _ensure_pPr(elem)
+        if pPr.find(qn("w:keepNext")) is None:
+            pPr.insert(0, OxmlElement("w:keepNext"))
 
 
 # ── Paragraph factories ───────────────────────────────────────────────────────
@@ -291,15 +288,14 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
     elif is_2col:
         # 2-column → 1-column transition.  The clause must stay in the
-        # 2-column section.  Prepend a column break so the clause always
-        # starts at the top of a fresh column (prevents splitting when both
-        # columns are already partially filled).
-        col_break = _make_column_break(title_ref, review=review)
-        all_elems = [col_break] + elements
+        # 2-column section.  Use w:keepNext on every paragraph except the
+        # last so Word keeps the whole block in one column — no hard column
+        # break, no blank spaces.
+        _add_keep_together(elements)
 
         if not anchor_para.text.strip():
             # Blank paragraph carries the sectPr: insert all elements before it.
-            for elem in all_elems:
+            for elem in elements:
                 ref_elem.addprevious(elem)
         else:
             # Content paragraph carries the sectPr (e.g. "T3 USD — Acc §").
@@ -312,7 +308,7 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
                 trailing_pPr = OxmlElement("w:pPr")
                 elements[-1].insert(0, trailing_pPr)
             trailing_pPr.append(sect_pr)
-            for elem in reversed(all_elems):
+            for elem in reversed(elements):
                 ref_elem.addnext(elem)
 
     else:
