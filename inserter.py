@@ -244,16 +244,31 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
     # would insert inside the cell instead of after the table).
     ref_elem = _body_level_elem(anchor_para)
 
-    # If the body-level element is a paragraph carrying a section break
-    # (w:sectPr inside its pPr), addnext() would land in the *next* section.
-    # Fix: insert each element immediately *before* the section-break paragraph
-    # using addprevious(), keeping the reference fixed so order is preserved.
     pPr_elem   = ref_elem.find(qn("w:pPr")) if ref_elem.tag == qn("w:p") else None
     has_sectPr = pPr_elem is not None and pPr_elem.find(qn("w:sectPr")) is not None
 
-    if has_sectPr:
-        for elem in elements:            # forward order, fixed ref → A B C before break
+    if has_sectPr and anchor_para.text.strip():
+        # Content paragraph that carries the section break (e.g. "T3 USD … §").
+        # addnext() would land in the next section, so instead we move the
+        # w:sectPr onto the trailing blank, then use addnext() normally —
+        # the clause stays in the current section and the break is preserved.
+        sect_pr = pPr_elem.find(qn("w:sectPr"))
+        pPr_elem.remove(sect_pr)
+        trailing_pPr = elements[-1].find(qn("w:pPr"))
+        if trailing_pPr is None:
+            trailing_pPr = OxmlElement("w:pPr")
+            elements[-1].insert(0, trailing_pPr)
+        trailing_pPr.append(sect_pr)
+        for elem in reversed(elements):
+            ref_elem.addnext(elem)
+
+    elif has_sectPr:
+        # Empty section-break paragraph (e.g. after a table).
+        # Insert all elements immediately *before* it so they stay in the
+        # current section.  Fixed reference → forward iteration preserves order.
+        for elem in elements:
             ref_elem.addprevious(elem)
+
     else:
-        for elem in reversed(elements):  # reversed + addnext → A B C after ref
+        for elem in reversed(elements):  # normal case
             ref_elem.addnext(elem)

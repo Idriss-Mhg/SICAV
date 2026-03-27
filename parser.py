@@ -117,10 +117,16 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
         if _is_in_table(para):
             continue
 
-        # ── Priority 1 : section break → everything before it is the section ──
+        # ── Priority 1 : section break → use this paragraph as the anchor ──
+        # We return the sectPr paragraph itself (index i) so the inserter can
+        # decide how to handle it:
+        #   • has text  → move sectPr to trailing blank, addnext()
+        #   • no text   → addprevious() (content lands before the break)
         pPr = para._element.pPr
         if pPr is not None and pPr.find(qn("w:sectPr")) is not None:
-            return last_content
+            if para.text.strip():
+                last_content = i   # T3-USD-style: the text belongs to this section
+            return i               # always return the sectPr paragraph
 
         if not para.text.strip():
             continue
