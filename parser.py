@@ -57,21 +57,33 @@ def _get_run_color(para):
     return None if val in (None, "auto") else val
 
 
+def _is_in_table(para):
+    """True if the paragraph lives inside a table cell rather than the document body."""
+    parent = para._element.getparent()
+    return parent is not None and parent.tag != qn("w:body")
+
+
 def _is_title_like(para, anchor_para):
     """
     A paragraph marks a new section boundary if it matches the anchor's
-    bold state AND its explicit color.
-
-    This correctly handles the pattern:
-        [colored + bold]  ← section title / anchor
-        [black  + bold]   ← sub-points  (same bold, different color → NOT a boundary)
-        [colored + bold]  ← next section title ← boundary ✓
-
-    The old heuristic (endswith ':') caused false positives on sub-points
-    like 'Business Day :' or 'Valuation Day:'.
+    bold state AND its explicit color AND is not a list/indented item.
     """
     if not para.text.strip():
         return False
+
+    # List items and indented paragraphs are sub-content, never section boundaries.
+    pPr = para._element.pPr
+    if pPr is not None:
+        if pPr.find(qn("w:numPr")) is not None:
+            return False
+        ind = pPr.find(qn("w:ind"))
+        if ind is not None:
+            left = ind.get(qn("w:left")) or ind.get(qn("w:start")) or "0"
+            try:
+                if int(left) > 0:
+                    return False
+            except ValueError:
+                pass
 
     anchor_bold  = bool(anchor_para.runs[0].bold) if anchor_para.runs else False
     para_bold    = bool(para.runs[0].bold)         if para.runs        else False
@@ -86,25 +98,36 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
     Returns the paragraph index AFTER WHICH the clause should be inserted.
 
     position='apres_titre'   → anchor_idx  (right after the anchor title)
-    position='apres_section' → last paragraph of the anchor's section,
-                               i.e. the paragraph just before the next
-                               title-like paragraph within the compartment.
+    position='apres_section' → last body paragraph of the anchor's section.
+
+    Algorithm: 'pending boundary'
+      - Table-cell paragraphs are ignored entirely (doc.paragraphs includes them).
+      - When a title-like paragraph is seen, we record a *potential* boundary but
+        keep scanning.  If body content follows, the title-like paragraph was a
+        sub-heading, not a true boundary, so we clear the pending flag.
+      - If no body content follows the last title-like hit, we return the position
+        recorded just before that title (= end of the section content).
     """
     if position != "apres_section":
         return anchor_idx
 
-    anchor_para = paragraphs[anchor_idx]
-    last_content = anchor_idx
+    anchor_para      = paragraphs[anchor_idx]
+    last_content     = anchor_idx
+    pending_boundary = None   # last_content at time of last title-like hit
 
     for i in range(anchor_idx + 1, comp_end + 1):
         para = paragraphs[i]
         if not para.text.strip():
             continue
+        if _is_in_table(para):            # skip cell paragraphs
+            continue
         if _is_title_like(para, anchor_para):
-            break
-        last_content = i
+            pending_boundary = last_content   # tentative section end
+        else:
+            pending_boundary = None           # content after title → sub-heading
+            last_content = i
 
-    return last_content
+    return pending_boundary if pending_boundary is not None else last_content
 
 
 def find_anchor(paragraphs, anchor_text, start, end):
