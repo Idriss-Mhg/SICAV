@@ -98,36 +98,40 @@ def find_insert_idx(paragraphs, anchor_idx, comp_end, position):
     Returns the paragraph index AFTER WHICH the clause should be inserted.
 
     position='apres_titre'   → anchor_idx  (right after the anchor title)
-    position='apres_section' → last body paragraph of the anchor's section.
-
-    Algorithm: 'pending boundary'
-      - Table-cell paragraphs are ignored entirely (doc.paragraphs includes them).
-      - When a title-like paragraph is seen, we record a *potential* boundary but
-        keep scanning.  If body content follows, the title-like paragraph was a
-        sub-heading, not a true boundary, so we clear the pending flag.
-      - If no body content follows the last title-like hit, we return the position
-        recorded just before that title (= end of the section content).
+    position='apres_section' → last body paragraph of the anchor's section,
+                               determined by (in order of priority):
+                               1. A w:sectPr (next-page section break) — always
+                                  present between narrative content and the share-
+                                  classes table → most reliable boundary.
+                               2. First title-like paragraph (color+bold match),
+                                  excluding list items and indented paragraphs.
     """
     if position != "apres_section":
         return anchor_idx
 
-    anchor_para      = paragraphs[anchor_idx]
-    last_content     = anchor_idx
-    pending_boundary = None   # last_content at time of last title-like hit
+    anchor_para  = paragraphs[anchor_idx]
+    last_content = anchor_idx
 
     for i in range(anchor_idx + 1, comp_end + 1):
         para = paragraphs[i]
+        if _is_in_table(para):
+            continue
+
+        # ── Priority 1 : section break → everything before it is the section ──
+        pPr = para._element.pPr
+        if pPr is not None and pPr.find(qn("w:sectPr")) is not None:
+            return last_content
+
         if not para.text.strip():
             continue
-        if _is_in_table(para):            # skip cell paragraphs
-            continue
-        if _is_title_like(para, anchor_para):
-            pending_boundary = last_content   # tentative section end
-        else:
-            pending_boundary = None           # content after title → sub-heading
-            last_content = i
 
-    return pending_boundary if pending_boundary is not None else last_content
+        # ── Priority 2 : next same-level title ────────────────────────────────
+        if _is_title_like(para, anchor_para):
+            break
+
+        last_content = i
+
+    return last_content
 
 
 def find_anchor(paragraphs, anchor_text, start, end):
