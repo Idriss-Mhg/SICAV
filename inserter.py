@@ -299,11 +299,10 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
 
             pivot = ref_elem.getprevious()
             while pivot is not None:
-                if pivot.tag == qn("w:tbl"):
-                    break
                 if pivot.tag == qn("w:p"):
                     if "".join(t.text or "" for t in pivot.iter(qn("w:t"))).strip():
                         break
+                # Skip tables and blank paragraphs; keep walking back.
                 pivot = pivot.getprevious()
 
             if pivot is not None:
