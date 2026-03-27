@@ -320,6 +320,13 @@ def insert_clause_after(anchor_para, clause_title, clause_type, content_items,
             _add_keep_together(elements[1:])
             sect_pr = pPr_elem.find(qn("w:sectPr"))
             pPr_elem.remove(sect_pr)
+            # Force a page break at the section transition so the clause and
+            # the share-class table always land on separate pages.
+            type_elem = sect_pr.find(qn("w:type"))
+            if type_elem is None:
+                type_elem = OxmlElement("w:type")
+                sect_pr.insert(0, type_elem)
+            type_elem.set(qn("w:val"), "nextPage")
             trailing_pPr = elements[-1].find(qn("w:pPr"))
             if trailing_pPr is None:
                 trailing_pPr = OxmlElement("w:pPr")
